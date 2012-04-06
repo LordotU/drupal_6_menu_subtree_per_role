@@ -1,0 +1,250 @@
+<?php
+
+  /*
+   * Helper function which iterates menu items and makes decision to show it or not
+   *
+   * @param array $tree menu tree
+   * @param string $menu_name menu name
+   * @param string $indent indentation
+   * @param int $exclude current menu item
+   * @param &array $options selectbox option
+   * @param &array $available_items all available_items in menu
+   * @param int $depth_limit menu depth limit
+   */
+  function _menu_subtree_per_role_items_recurse($tree, $menu_name, $indent, $exclude, &$options, &$available_items, $depth_limit = 9) {
+    foreach ($tree as $data) {
+      if ($data['link']['depth'] > $depth_limit)
+        break;
+      
+      if ((in_array($data['link']['mlid'], $available_items) || in_array($data['link']['plid'], $available_items)) && $data['link']['hidden'] >= 0 && $data['link']['mlid'] != $exclude) {
+      
+        $title = $indent .' '. truncate_utf8($data['link']['title'], 30, TRUE, FALSE);
+        if ($data['link']['hidden']) {
+          $title .= ' ('. t('disabled') .')';
+        }
+        $options[$menu_name .':'. $data['link']['mlid']] = $title;
+        
+      }
+
+      if ($data['below']) {
+        _menu_subtree_per_role_items_recurse($data['below'], $menu_name, $indent .'--', $exclude, $options, $available_items);
+      }
+    }
+  }
+
+  /*
+   * Implementation of hook_perm()
+   */
+  function menu_subtree_per_role_perm() {
+    return array('administer menu subtree per role');
+  }
+  /*
+   * Implementation of hook_cron()
+   */
+  function menu_subtree_per_role_cron() {
+    //@todo Add module db table cleaning for non existing menu items
+
+    $mlid_query = db_query("SELECT DISTINCT `mlid` FROM {roles_menus_items}");
+    while($mlid_result = db_fetch_object($mlid_query))
+      db_query("DELETE FROM {roles_menus_items} WHERE `mlid` NOT IN (SELECT `mlid` FROM {menu_links} WHERE `mlid` = %d)", $mlid_result->mlid);
+
+    $menu_query = db_query("SELECT DISTINCT `menu_name` FROM {roles_menus}");
+    while($menu_result = db_fetch_object($menu_query))
+      db_query("DELETE FROM {roles_menus} WHERE `menu_name` NOT IN (SELECT `menu_name` FROM {menu_custom} WHERE `menu_name` = '%s')", $menu_result->menu_name);
+  }
+
+  /*
+   * Implementation of hook_form_alter()
+   *
+   * This function altering three forms: node edit form, menu edit form and menu item edit form
+   *
+   * @param &array form
+   * @param &array form_state
+   * @param string $form_id
+   */
+  function menu_subtree_per_role_form_alter(&$form, &$form_state, $form_id) {
+    // @todo Add "Menu root add" flag
+    global $user;
+    
+    /* For menu and menu item edit forms */
+    if(($form_id == 'menu_edit_menu' || $form_id == 'menu_edit_item') && user_access('administer menu subtree per role')) {
+      $options = user_roles(true); // Select all available roles exclude anonymous
+      
+      $default = array();
+      
+      if($form_id == 'menu_edit_menu') { // For menu edit form
+        // Select roles which correspond concrete menu and check defaults
+        $default_query = db_query("SELECT `rid` FROM {roles_menus} WHERE `menu_name` = '%s'", $form['menu_name']['#value']);      
+        while($default_result = db_fetch_object($default_query))
+          $default[] = $default_result->rid;
+          
+        $form['#after_build'][] = 'menu_subtree_per_role_menu_form_after_build';
+        
+        $description = t('All roles that allowed to use that menu');
+      }
+      
+      if($form_id == 'menu_edit_item') { // For menu item edit form
+        // Select roles which correspond concrete menu item and check defaults
+        $default_query = db_query("SELECT `rid` FROM {roles_menus_items} WHERE `mlid` = %d", $form['menu']['mlid']['#value']);      
+        while($default_result = db_fetch_object($default_query))
+          $default[] = $default_result->rid;
+          
+        $form['#after_build'][] = 'menu_subtree_per_role_menu_item_form_after_build';
+        
+        $description = t('All roles that allowed to use that menu item');
+      }
+      
+      $form['menu_subtree_per_role'] = array(
+        '#type' => 'fieldset',
+        '#title' => t('Menu subtree per role access settings'),
+        '#description' => $description,
+        '#collapsible' => true,
+        '#collapsed' => true,
+        '#weight' => -50
+      );
+      $form['menu_subtree_per_role']['roles'] = array(
+        '#type' => 'checkboxes',
+        '#title' => '',
+        '#options' => $options,
+        '#default_value' => $default
+      );
+    }
+    
+    /* For node edit form */
+    if (strstr($form_id, '_node_form')) {
+
+      if($user->uid != 1) {
+        $roles_ids = array_keys($user->roles);
+        $mlid = $form['menu']['#item']['mlid'];
+        
+        // Select all menus which corresponds user's roles - SYSTEM NAMES
+        $user_menus_query = db_query("SELECT * FROM {roles_menus}");
+        // @todo Rewrite this block in one SQL query
+        $available_menus = array();
+        while($user_menus_result = db_fetch_object($user_menus_query))        
+          if( in_array($user_menus_result->rid, $roles_ids) )
+            if( !in_array($user_menus_result->menu_name, $available_menus) )
+              $available_menus[] = $user_menus_result->menu_name;
+        
+        
+        // Select all menus which corresponds user's roles - USER FRIENDLY NAMES
+        $all_menus = menu_get_menus();
+        $available_menus_names = array();        
+        foreach( array_keys($all_menus) as $menu )
+          if( in_array($menu, $available_menus) )
+            $available_menus_names[$menu] = $all_menus[$menu];
+        
+        
+        // Select all menu items which corresponds user's roles
+        $user_menus_items_query = db_query("SELECT * FROM {roles_menus_items}");
+        // @todo Rewrite this block in one SQL query
+        $available_items = array();
+        while($user_menus_items_result = db_fetch_object($user_menus_items_query))
+          if( in_array($user_menus_items_result->rid, $roles_ids) )
+            $available_items[] = $user_menus_items_result->mlid;
+        
+        
+        // Get all menus trees
+        $trees = array();
+        foreach($available_menus as $menu)
+          $trees[$menu] = menu_tree_all_data($menu);
+        
+        
+        // Form available menus items array
+        $options = array();
+        foreach($trees as $menu_name => $tree) {
+          $options[ $menu_name.':0' ] = '<'.$available_menus_names[$menu_name].'>';
+          
+          _menu_subtree_per_role_items_recurse($tree, $menu_name, '--', $mlid, $options, $available_items);
+        }
+        
+        if(!empty($options)) {       
+          $default = $form['menu']['#item']['menu_name'].':'.$form['menu']['#item']['plid'];
+          
+          $form['menu']['parent'] = array(
+            '#type' => 'select',
+            '#title' => t('Parent item'),
+            '#default_value' => $default,
+            '#options' => $options,
+            '#description' => t('The maximum depth for an item and all its children is fixed at !maxdepth. Some menu items may not be available as parents if selecting them would exceed this limit.', array('!maxdepth' => MENU_MAX_DEPTH)),
+            '#attributes' => array('class' => 'menu-title-select'),
+          );
+          
+          $form['#after_build'][] = 'menu_subtree_per_role_node_form_after_build';
+        }
+        else
+          unset($form['menu']);
+      }
+    }
+    
+  }  
+
+  /*
+   * Implementation of _after_build - NODE EDIT FORM
+   */
+  /*Сабмит и валидация формы ноды*/
+  function menu_subtree_per_role_node_form_after_build($form, &$form_state) {
+    $form['#validate'][] = 'menu_subtree_per_role_node_form_validate';
+    
+    return $form;
+  }
+  /*
+   * Implementation of _form_validate - NODE EDIT FORM
+   */
+  function menu_subtree_per_role_node_form_validate($elements, &$form_state) {
+    if(!empty($form_state['values']['menu']['link_title']) && strstr($form_state['values']['menu']['parent'], ':0')/* && !$form_state['values']['menu']['allowed_to_menu_root_add']*/)
+      form_set_error('menu][parent', t('You are not allowed to add menu item in the menu root!'));
+  }
+  /*
+   * Implementation of _after_build - MENU EDIT FORM
+   */
+  function menu_subtree_per_role_menu_form_after_build($form, &$form_state) {
+    $form['#submit'][] = 'menu_subtree_per_role_menu_form_submit';
+    
+    return $form;
+  }
+  /*
+   * Implementation of _form_submit() - MENU EDIT FORM
+   */
+  function menu_subtree_per_role_menu_form_submit($form, &$form_state) {
+    $menu = $form_state['values']['menu_name'];    
+    $roles = $form_state['values']['roles'];
+    
+    foreach($roles as $key => $value) {
+    
+      if($value && !db_query("SELECT * FROM {roles_menus} WHERE `rid` = %d AND `menu_name` = '%s'", $key, $menu)->num_rows) {
+        $row = array('rid' => $key, 'menu_name' => $menu);
+        drupal_write_record('roles_menus', $row);
+      }
+      elseif(!$value)
+        db_query("DELETE FROM {roles_menus} WHERE `rid` = %d AND `menu_name` = '%s'", $key, $menu);
+        
+    }
+  }
+  /*
+   * Implementation of _after_build - MENU ITEM EDIT FORM
+   */
+  function menu_subtree_per_role_menu_item_form_after_build($form, &$form_state) {
+    $form['#submit'][] = 'menu_subtree_per_role_menu_item_form_submit';
+    
+    return $form;
+  }
+  /*
+   * Implementation of _form_submit() - MENU ITEM EDIT FORM
+   */
+  function menu_subtree_per_role_menu_item_form_submit($form, &$form_state) {
+    $mlid = $form_state['values']['menu']['mlid'];
+    $roles = $form_state['values']['roles'];
+    
+    foreach($roles as $key => $value) {
+    
+      if($value && !db_query("SELECT * FROM {roles_menus_items} WHERE `rid` = %d AND `mlid` = %d", $key, $mlid)->num_rows) {
+        $row = array('rid' => $key, 'mlid' => $mlid);
+        drupal_write_record('roles_menus_items', $row);
+      }
+      elseif(!$value)
+        db_query("DELETE FROM {roles_menus_items} WHERE `rid` = %d AND `mlid` = %d", $key, $mlid);
+    
+    }
+  }
+  

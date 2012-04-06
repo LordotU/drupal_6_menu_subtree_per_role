@@ -1,0 +1,7 @@
+name = Menu subtree per role
+description = Allows you to flexible configure menu and menu items access per role
+
+dependencies[] = menu
+
+version = 6.x-0.1.0
+core = 6.x

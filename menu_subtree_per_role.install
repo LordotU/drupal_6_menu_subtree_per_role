@@ -1,0 +1,60 @@
+<?php
+
+  /*
+   * Implementation of hook_schema()
+   *
+   * Provides two database tables that will be stored relations between roles and menus, roles and menu items
+   */
+  function menu_subtree_per_role_schema() {
+    $schema['roles_menus'] = array(
+      'fields' => array(
+        'rid' => array(
+          'type' => 'int',
+          'unsigned' => true,
+          'not null' => true
+        ),
+        'menu_name' => array(
+          'type' => 'varchar',
+          'length' => 50,
+          'not null' => true
+        )
+      ),
+      'indexes' => array(
+        'roles_menus_rid' => array('rid'),
+        'roles_menus_menu_name' => array('menu_name')
+      )
+    );
+    $schema['roles_menus_items'] = array(
+      'fields' => array(
+        'rid' => array(
+          'type' => 'int',
+          'unsigned' => true,
+          'not null' => true
+        ),
+        'mlid' => array(
+          'type' => 'int',
+          'unsigned' => true,
+          'not null' => true
+        )
+      ),
+      'indexes' => array(
+        'roles_menus_items_rid' => array('rid'),
+        'roles_menus_items_mlid' => array('mlid')
+      )
+    );
+    
+    return $schema;
+  }
+
+  /*
+   * Implementation of hook_install()
+   */
+  function menu_subtree_per_role_install() {   
+    drupal_install_schema('menu_subtree_per_role');
+  }
+  /*
+   * Implementation of hook_uninstall()
+   */
+  function menu_subtree_per_role_uninstall() {
+    drupal_uninstall_schema('menu_subtree_per_role');
+  }
