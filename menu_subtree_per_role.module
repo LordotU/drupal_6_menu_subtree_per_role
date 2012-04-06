@@ -1,4 +1,25 @@
 <?php
+  /*
+   * Helper function which iterates through item plids chain and makes decision to show it or not
+   *
+   * @param array $item menu item properties array
+   * @param array $available_items  all available_items in menu
+   *
+   * @return bool
+   */
+  function _menu_subtree_per_role_is_available_item($item, $available_items) {
+    $plids = array(
+      $item['p1'], $item['p2'], $item['p3'],
+      $item['p4'], $item['p5'], $item['p6'],
+      $item['p7'], $item['p8'], $item['p9']
+    );
+
+    foreach($plids as $plid)
+      if(in_array($plid, $available_items))
+        return true;
+
+    return false;
+  }
 
   /*
    * Helper function which iterates menu items and makes decision to show it or not
@@ -16,7 +37,7 @@
       if ($data['link']['depth'] > $depth_limit)
         break;
       
-      if ((in_array($data['link']['mlid'], $available_items) || in_array($data['link']['plid'], $available_items)) && $data['link']['hidden'] >= 0 && $data['link']['mlid'] != $exclude) {
+      if ((in_array($data['link']['mlid'], $available_items) || in_array($data['link']['plid'], $available_items) || _menu_subtree_per_role_is_available_item($data['link'], $available_items)) && $data['link']['hidden'] >= 0 && $data['link']['mlid'] != $exclude) {
       
         $title = $indent .' '. truncate_utf8($data['link']['title'], 30, TRUE, FALSE);
         if ($data['link']['hidden']) {
@@ -38,6 +59,7 @@
   function menu_subtree_per_role_perm() {
     return array('administer menu subtree per role');
   }
+
   /*
    * Implementation of hook_cron()
    */
@@ -149,7 +171,7 @@
         foreach($available_menus as $menu)
           $trees[$menu] = menu_tree_all_data($menu);
         
-        
+
         // Form available menus items array
         $options = array();
         foreach($trees as $menu_name => $tree) {
