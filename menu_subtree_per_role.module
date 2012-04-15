@@ -32,22 +32,24 @@
    * @param &array $available_items all available_items in menu
    * @param int $depth_limit menu depth limit
    */
-  function _menu_subtree_per_role_items_recurse($tree, $menu_name, $indent, $exclude, &$options, &$available_items, $depth_limit = 9) {
+  function _menu_subtree_per_role_items_recurse($tree, $menu_name, $indent, $exclude, &$options, &$available_items, $allowed_to_show = null, $depth_limit = 9) {
     foreach ($tree as $data) {
       if ($data['link']['depth'] > $depth_limit)
         break;
       
-      if ((in_array($data['link']['mlid'], $available_items) || in_array($data['link']['plid'], $available_items) || _menu_subtree_per_role_is_available_item($data['link'], $available_items)) && $data['link']['hidden'] >= 0 && $data['link']['mlid'] != $exclude) {
-      
-        $title = $indent .' '. truncate_utf8($data['link']['title'], 30, TRUE, FALSE);
-        if ($data['link']['hidden']) {
-          $title .= ' ('. t('disabled') .')';
-        }
+       if ((in_array($data['link']['mlid'], $available_items) || in_array($data['link']['plid'], $available_items) || _menu_subtree_per_role_is_available_item($data['link'], $available_items) || $data['link']['mlid'] == $allowed_to_show) && $data['link']['hidden'] >= 0 && $data['link']['mlid'] != $exclude) {
+        if ($data['link']['hidden'])
+          continue;
+
+        if($data['link']['mlid'] != $allowed_to_show)
+          $title = $indent .' '. truncate_utf8($data['link']['title'], 30, TRUE, FALSE);
+        else
+          $title = $indent .' '. "LEAVE WITHOUT CHANGES (". truncate_utf8($data['link']['title'], 30, TRUE, FALSE) .")";
+
         $options[$menu_name .':'. $data['link']['mlid']] = $title;
-        
       }
 
-      if ($data['below']) {
+      if ($data['below'] && $data['link']['mlid'] != $exclude) {
         _menu_subtree_per_role_items_recurse($data['below'], $menu_name, $indent .'--', $exclude, $options, $available_items);
       }
     }
@@ -170,19 +172,27 @@
         $trees = array();
         foreach($available_menus as $menu)
           $trees[$menu] = menu_tree_all_data($menu);
-        
+
+        // Select default parent menu item
+        $default = $form['menu']['#item']['menu_name'].':'.$form['menu']['#item']['plid'];
+        if($form['menu']['#item']['plid']) {
+          $default_object = menu_link_load($form['menu']['#item']['plid']);
+
+          // If parent menu item not contains in $available_items we force to show it
+          if(!_menu_subtree_per_role_is_available_item($default_object, $available_items))
+            $allowed_to_show = $form['menu']['#item']['plid'];
+        }
+
 
         // Form available menus items array
         $options = array();
         foreach($trees as $menu_name => $tree) {
           $options[ $menu_name.':0' ] = '<'.$available_menus_names[$menu_name].'>';
           
-          _menu_subtree_per_role_items_recurse($tree, $menu_name, '--', $mlid, $options, $available_items);
+          _menu_subtree_per_role_items_recurse($tree, $menu_name, '--', $mlid, $options, $available_items, $allowed_to_show);
         }
         
         if(!empty($options)) {       
-          $default = $form['menu']['#item']['menu_name'].':'.$form['menu']['#item']['plid'];
-          
           $form['menu']['parent'] = array(
             '#type' => 'select',
             '#title' => t('Parent item'),
